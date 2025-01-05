@@ -1,40 +1,8 @@
+import scala.annotation.tailrec
+
 object p21 {
 
   val digits = Seq("789", "456", "123", " 0A")
-  val arrows = Seq(" ^A", "<v>")
-
-  val arrowMap = Map(
-    "AA" -> "A", // extra A by itself
-    "<<" -> "A",
-    ">>" -> "A",
-    "vv" -> "A",
-    "^^" -> "A",
-    "<v" -> ">A",
-    "<^" -> ">^A",
-    // ">v" "<>" and "><" never appear except in initial
-    ">v" -> "<A",
-    ">^" -> "<^A",
-    "v<" -> "<A",
-    // v^, ^v never appear
-    // ^<, ^> never appear except in paths that don't live past first expansion
-    // never appears though "v>" -> Seq(">A"),
-    "v>" -> ">A",
-    "^<" -> "v<A",
-    "^>" -> "v>A",
-    "A^" -> "<A",
-    "Av" -> "<vA",
-    "A>" -> "vA",
-    "A<" -> "<<vA",
-    "^A" -> ">A",
-    ">A" -> "^A",
-    "<A" -> ">>^A",
-    "vA" -> ">^A"
-  )
-
-  val arrowSeqMap: Map[String, Seq[String]] = arrowMap.map { case (k, v) => (k, v.sliding(2).toSeq) } + ("A" -> Seq("A"))
-  for (elem <- arrowSeqMap) {
-    println(elem)
-  }
 
   def allPathsBetween(keypad: Seq[String], start: (Int, Int), end: (Int, Int)): List[String] = {
     val dr = end._1 - start._1
@@ -82,47 +50,102 @@ object p21 {
     }._1
   }
 
-  def expand(code: String, i: Integer): String = {
-    (1 to i).foldLeft(code) { (acc, x) =>
-      val next = acc.sliding(2).foldLeft("A") { (newCode, pair) =>
-        val next = arrowMap(pair)
-        newCode + next
-      }
-      println(x, next.length)
-      //next.groupBy(identity).mapValues(_.size).foreach(println)
-      next
-    }
-  }
+  // hard-wire expansion of sequences based on samples + futzing around to see what gives lower totals
+  // # of legal moves on arrow keypad is limited enough to allow brute-force expansion.
+  // When you account for (a) repeated keys being better than alternating and (b) some sequences being illegal,
+  //  the only real decision point is moving to "v" arrow via v< or <v; and moving from v to A via >^ or ^>
+  // other sequences like ^^<< only appear as sequences for initial keypad
+  val expandOneLevel = Map(
+    "" -> Seq(""),
+    //"<v<" -> Seq("<v<", ">", "<", ">>^"),
+    "<^" -> Seq("v<<", ">^", ">"),
+    "<v" -> Seq("v<<", ">", "^>"),
+    "<" -> Seq("v<<", ">>^"),
+    "v" -> Seq("<v", "^>"),
+    "^" -> Seq("<", ">"),
+    ">" -> Seq("v", "^"),
+    "v<<" -> Seq("<v", "<", "", ">>^"),
+    ">>^" -> Seq("v", "", "<^", ">"),
+    ">^" -> Seq("v", "<^", ">"),
+    ">v" -> Seq("v", "<", "^>"),
+    "^^>" -> Seq("<", "", "v>", "^"),
+    "vvv" -> Seq("<v", "", "", "^>"),
+    "^^^" -> Seq("<", "", "", ">"),
+    "^<<" -> Seq("<", "v<", "", ">>^"),
+    "vv" -> Seq("<v", "", "^>"),
+    "^^" -> Seq("<", "", ">"),
+    ">>" -> Seq("v", "", "^"),
+    "<<" -> Seq("v<<", "", ">>^"),
+    "^^<<" -> Seq("<", "", "v<", "", ">>^"),
+    "<<^^" -> Seq("v<<", "", ">^", "", ">"),
+    "<^^^" -> Seq("v<<", ">^", "", "", ">"),
+    "^^^<" -> Seq("<", "", "", "v<", ">>^"),
+    "v<" -> Seq("<v", "<", ">>^"),
+    ">vv" -> Seq("v", "<", "", "^>"),
+    ">>vv" -> Seq("v", "", "<", "", "^>"),
+    ">vvv" -> Seq("v", "<", "", "", "^>"),
+    "vvv>" -> Seq("<v", "", "", ">", "^"),
+    "<<^" -> Seq("v<<", "", ">^", ">"),
+    "^<<" -> Seq("<", "v<", "", ">>^"),
+    ">>v" -> Seq("v", "", "<", "^>"),
+    "vv>" -> Seq("<v", "", ">", "^"),
+    "^>" -> Seq("<", "v>", "^"),
+    "v>" -> Seq("<v", ">", "^"),
+    "^<" -> Seq("<", "v<", ">>^"),
+  )
 
-  def expandCounts(code: String, i: Integer): Map[String, Int] = {
-    val initialSequenceCounts: Map[String, Int] = code.sliding(2)
-      .flatMap(s => arrowSeqMap(s)).toSeq.groupBy(identity).mapValues(_.size)
-
-    (1 to i).foldLeft(initialSequenceCounts) { (currIterMap, x) =>
-      currIterMap.foldLeft(Map.empty[String, Int]) { (nextIterMap, entry) =>
-        val (seq, count) = entry
-        nextIterMap ++ arrowSeqMap(seq).map(s => (s, count + nextIterMap.getOrElse(s, 0))).toMap
+  @tailrec
+  def expandCounts(counts: Map[String, Long], i: Integer): Map[String, Long] = {
+    if (i == 0) {
+      counts
+    } else {
+      // expand one level
+      val nextCounts = counts.foldLeft(Map.empty[String, Long]) { (nextMap, pair) =>
+        val (code, count) = pair
+        val nextCodes = expandOneLevel(code)
+        nextCodes.foldLeft(nextMap) { (acc, nextCode) =>
+          val nextCount = acc.getOrElse(nextCode, 0L) + count
+          acc + (nextCode -> nextCount)
+        }
       }
+      expandCounts(nextCounts, i - 1)
     }
   }
 
   def main(args: Array[String]): Unit = {
-    val codes = "029A\n980A\n179A\n456A\n379A".split("\n")
-    val codes2 = "805A\n964A\n459A\n968A\n671A".split("\n")
+    val codes2 = "029A\n980A\n179A\n456A\n379A".split("\n")
+    val codes = "805A\n964A\n459A\n968A\n671A".split("\n")
 
     val finalOutput = codes.map { code =>
       println(code)
       val p1 = keypadPresses(digits, code)
       println(p1)
 
-      val filtered = p1.filter(s => s.sliding(2).forall(arrowMap.contains))
-      println(filtered)
-      filtered.map(p => expand("A" + p, 3)).map(m => m.length).sum
+      val robotKeypads = 25 // part 1 = 2, part 2 = 25
+      p1.flatMap(p => {
+        val initialCounts = p.split("A").groupBy(identity).mapValues(_.length.toLong)
+        // don't consider patterns like <^<^ because <<^^ or ^^<< must be shorter
+        initialCounts.foreach(c => if (!expandOneLevel.contains(c._1)) println("Warning: " + c))
+
+        if (initialCounts.forall(c => expandOneLevel.contains(c._1))) {
+          val finalCounts = expandCounts(initialCounts, robotKeypads)
+          Some(finalCounts.map(c => (c._1.length + 1) * c._2).sum)
+        } else None
+      }).min
     }
     val result = codes.zip(finalOutput).map { case (code, output) =>
       println(code, output)
       output * code.substring(0, 3).toInt
     }.sum
     println(result)
+    //384886503529684 too high!
+    //384041985863254 a little lower, still too high
+    // 382248515937734 wrong answer
+    // 361653034382136 wrong answer
+    //349776057016716 wrong answer
+    // 337244995283638 wrong --> included some illegal moves
+    // 337744744231414 -> finally right answer!
+
+    //153758411085208 too low - so believe we are on right order of magnitude
   }
 }
